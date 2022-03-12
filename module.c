@@ -22,6 +22,7 @@
 
 #ifdef WIN32
 #include <windows.h>
+#include <shlwapi.h>
 #endif
 
 #include "module.h"
@@ -29,6 +30,45 @@
 
 #include <signal.h>
 #include <setjmp.h>
+
+#ifdef WIN32
+static char config_path[MAX_PATH + 1] = { 0 };
+
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+{
+    if (fdwReason == DLL_PROCESS_ATTACH)
+    {
+        GetModuleFileName(hinstDLL, config_path, sizeof(config_path));
+        PathRemoveFileSpec(config_path);
+        PathAppend(config_path, CFG_FILE);
+        FILE* f = fopen(config_path, "rb");
+        if (!f)
+        {
+            for (int i = 0; i < 32; i++)
+                conf[i] = 0x00;
+
+            f = fopen(config_path, "wb");
+            if (f)
+            {
+                fwrite(conf, 8, 32 / 8, f);
+                fclose(f);
+            }
+            else
+            {
+                message("Unable to create config");
+            }
+        }
+        else
+        {
+            fread(conf, 8, 32 / 8, f);
+            fclose(f);
+        }
+    }
+    return TRUE;
+}
+#else
+static const char* config_path = CFG_FILE;
+#endif
 
 static jmp_buf CPU_state;
 static void seg_av_handler(int signal_code)
@@ -143,7 +183,7 @@ EXPORT void CALL DllAbout(p_void hParent)
 EXPORT void CALL DllConfig(p_void hParent)
 {
     system("sp_cfgui");
-    update_conf(CFG_FILE);
+    update_conf(config_path);
 
     if (DMEM == IMEM || GET_RCP_REG(SP_PC_REG) % 4096 == 0x00000000)
         return;
@@ -303,7 +343,7 @@ EXPORT void CALL InitiateRSP(RSP_INFO Rsp_Info, pu32 CycleCount)
 
     if (CycleCount != NULL) /* cycle-accuracy not doable with today's hosts */
         *CycleCount = 0;
-    update_conf(CFG_FILE);
+    update_conf(config_path);
 
     RSP_INFO_NAME = Rsp_Info;
     DRAM = GET_RSP_INFO(RDRAM);
@@ -373,7 +413,7 @@ EXPORT void CALL RomClosed(void)
  * Sometimes the end user won't correctly install to the right directory. :(
  * If the config file wasn't installed correctly, politely shut errors up.
  */
-    stream = fopen(CFG_FILE, "wb");
+    stream = fopen(config_path, "wb");
     fwrite(conf, 8, 32 / 8, stream);
     fclose(stream);
     return;
@@ -498,29 +538,3 @@ void export_SP_memory(void)
     export_instruction_cache();
     return;
 }
-
-/*
- * Microsoft linker defaults to an entry point of `_DllMainCRTStartup',
- * which attaches several CRT dependencies.  To eliminate linkage of unused
- * startup CRT code, we direct the linker to use DllMain as the entry point.
- *
- * The same approach is taken with MinGW to get those weird MinGW-specific
- * messages and unused initializer functions out of the plugin binary.
- */
-#ifdef _WIN32
-BOOL WINAPI
-DllMain(HINSTANCE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
-{
-    hModule = lpReserved = NULL; /* unused */
-    switch (ul_reason_for_call) {
-    case 1:  /* DLL_PROCESS_ATTACH */
-    case 2:  /* DLL_THREAD_ATTACH */
-    case 3:  /* DLL_THREAD_DETACH */
-    case 0:  /* DLL_PROCESS_DETACH */
-        break;
-    default:
-        message("Unknown reason for call.");
-    }
-    return TRUE;
-}
-#endif

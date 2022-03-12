@@ -37,7 +37,7 @@ set FLAGS_x86=-Wall -pedantic^
  -DPLUGIN_API_VERSION=0x0101^
  -DARCH_MIN_SSE2^
  -mstackrealign^
- -march=native
+ -msse4.2
 set C_FLAGS=%FLAGS_x86%
 
 if not exist obj (
@@ -72,6 +72,5 @@ as -o "%obj%\vu\divide.o"         "%obj%\vu\divide.asm"
 ECHO.
 
 ECHO Linking assembled object files...
-gcc --shared -e _DllMain@12 -o "%obj%\rspdebug.dll" -L %lib% %OBJ_LIST% -lmsvcrt
+gcc --shared -e _DllMain@12 -o "%obj%\rspdebug.dll" -L %lib% %OBJ_LIST% -lmsvcrt -lshlwapi
 strip -o "%obj%\rsp.dll" "%obj%\rspdebug.dll" --strip-all
-PAUSE
