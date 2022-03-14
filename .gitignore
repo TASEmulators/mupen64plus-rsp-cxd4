@@ -17,3 +17,5 @@ obj
 *.obj
 *.dll
 *.exe
+
+_obj-sse2/
