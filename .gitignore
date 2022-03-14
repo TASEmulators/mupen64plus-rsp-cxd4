@@ -7,3 +7,13 @@ Roms/
 *.suo
 *.sdf
 *.user
+*.asm
+*.s
+
+*.o
+*.so
+obj
+
+*.obj
+*.dll
+*.exe

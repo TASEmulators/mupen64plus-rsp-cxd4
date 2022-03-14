@@ -1,6 +1,6 @@
 #/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 # *   mupen64plus-rsp-cxd4 - Makefile                                       *
-# *   http://bitbucket.org/ecsv/mupen64plus-rsp-cxd4/                       *
+# *   Mupen64Plus homepage: https://mupen64plus.org/                        *
 # *   Copyright (C) 2010 Jon Ring                                           *
 # *   Copyright (C) 2008-2009 Richard Goedeken                              *
 # *   Copyright (C) 2007-2008 DarkJeztr Tillin9                             *
@@ -67,7 +67,7 @@ ifeq ("$(patsubst MINGW%,MINGW,$(UNAME))","MINGW")
   PIC = 0
 endif
 ifeq ("$(OS)","NONE")
-  $(error OS type "$(UNAME)" not supported.  Please file bug report at 'http://code.google.com/p/mupen64plus/issues')
+  $(error OS type "$(UNAME)" not supported.  Please file bug report at 'https://github.com/mupen64plus/mupen64plus-core/issues')
 endif
 
 # detect system architecture
@@ -111,14 +111,20 @@ ifneq ("$(filter arm%,$(HOST_CPU))","")
     $(warning Architecture "$(HOST_CPU)" not officially supported.')
   endif
 endif
+ifneq ("$(filter arm64 aarch64,$(HOST_CPU))","")
+  CPU := AARCH64
+  ARCH_DETECTED := 64BITS
+  PIC ?= 1
+  $(warning Architecture "$(HOST_CPU)" not officially supported.')
+endif
 ifeq ("$(CPU)","NONE")
-  $(error CPU type "$(HOST_CPU)" not supported.  Please file bug report at 'http://code.google.com/p/mupen64plus/issues')
+  $(error CPU type "$(HOST_CPU)" not supported.  Please file bug report at 'https://github.com/mupen64plus/mupen64plus-core/issues')
 endif
 
 # base CFLAGS, LDLIBS, and LDFLAGS
 OPTFLAGS ?= -O3 -flto
 WARNFLAGS ?= -Wall
-CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -fvisibility=hidden -I../../ -mstackrealign
+CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -fvisibility=hidden -I$(SRCDIR)
 CPPFLAGS += -DM64P_PLUGIN_API
 LDFLAGS += $(SHARED)
 
@@ -129,11 +135,17 @@ ifeq ($(CPU), X86)
     CPPFLAGS += -DARCH_MIN_SSE2
     POSTFIX = -sse2
   endif
-  ifeq ($(SSE), SSSE3)
-    CFLAGS   += -mssse3
-    CPPFLAGS += -DARCH_MIN_SSSE3
-    POSTFIX = -ssse3
-  endif
+  CFLAGS += -mstackrealign
+endif
+
+ifeq ($(NEON), 1)
+    CFLAGS   += -mfpu=neon
+    CPPFLAGS += -DUSE_SSE2NEON
+endif
+
+HLEVIDEO ?= 0
+ifeq ($(HLEVIDEO), 1)
+  CFLAGS += -DHLEVIDEO
 endif
 
 # Since we are building a shared library, we must compile with -fPIC on some architectures
@@ -167,25 +179,15 @@ ifeq ($(OS), LINUX)
   LDLIBS += -ldl
 endif
 ifeq ($(OS), OSX)
-  # Select the proper SDK
-  # Also, SDKs are stored in a different location since XCode 4.3
-  OSX_SDK ?= $(shell sw_vers -productVersion | cut -f1 -f2 -d .)
-  OSX_XCODEMAJ = $(shell xcodebuild -version | grep '[0-9]*\.[0-9]*' | cut -f2 -d ' ' | cut -f1 -d .)
-  OSX_XCODEMIN = $(shell xcodebuild -version | grep '[0-9]*\.[0-9]*' | cut -f2 -d ' ' | cut -f2 -d .)
-  OSX_XCODEGE43 = $(shell echo "`expr $(OSX_XCODEMAJ) \>= 4``expr $(OSX_XCODEMIN) \>= 3`")
-  ifeq ($(OSX_XCODEGE43), 11)
-    OSX_SYSROOT := /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs
-  else
-    OSX_SYSROOT := /Developer/SDKs
-  endif
+OSX_SDK_PATH = $(shell xcrun --sdk macosx --show-sdk-path)
 
   ifeq ($(CPU), X86)
     ifeq ($(ARCH_DETECTED), 64BITS)
-      CFLAGS += -pipe -arch x86_64 -mmacosx-version-min=$(OSX_SDK) -isysroot $(OSX_SYSROOT)/MacOSX$(OSX_SDK).sdk
+      CFLAGS += -pipe -arch x86_64 -mmacosx-version-min=10.6 -isysroot $(OSX_SDK_PATH)
       LDFLAGS += -arch x86_64
       LDLIBS += -ldl
     else
-      CFLAGS += -pipe -mmmx -msse -fomit-frame-pointer -arch i686 -mmacosx-version-min=$(OSX_SDK) -isysroot $(OSX_SYSROOT)/MacOSX$(OSX_SDK).sdk
+      CFLAGS += -pipe -mmmx -msse -fomit-frame-pointer -arch i686 -mmacosx-version-min=10.6 -isysroot $(OSX_SDK_PATH)
       LDFLAGS += -arch i686
       LDLIBS += -ldl
     endif
@@ -236,6 +238,7 @@ ifeq ($(DEBUG),1)
   CFLAGS += -g
   INSTALL_STRIP_FLAG ?= 
 else
+  CFLAGS += -DNDEBUG
   INSTALL_STRIP_FLAG ?= -s
 endif
 
@@ -296,7 +299,8 @@ targets:
 	@echo "    HLEVIDEO=(1|0) == Move task of gfx emulation to a HLE video plugins"
 	@echo "    POSTFIX=name  == String added to the name of the the build (default: '')"
 	@echo "    SSE=version   == Optimize for SSE technology version"
-	@echo "                     (none [default on non-x86], SSE2 [default on x86], SSSE3)"
+	@echo "                     (none [default on non-x86], SSE2 [default on x86])"
+	@echo "    NEON=(1|0)    == Optimize for NEON technology version"
 	@echo "  Install Options:"
 	@echo "    PREFIX=path   == install/uninstall prefix (default: /usr/local)"
 	@echo "    LIBDIR=path   == library prefix (default: PREFIX/lib)"

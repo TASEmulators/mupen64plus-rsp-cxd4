@@ -1,7 +1,7 @@
 /******************************************************************************\
 * Project:  MSP Simulation Layer for Scalar Unit Operations                    *
 * Authors:  Iconoclast                                                         *
-* Release:  2016.03.26                                                         *
+* Release:  2019.08.06                                                         *
 * License:  CC0 Public Domain Dedication                                       *
 *                                                                              *
 * To the extent possible under law, the author(s) have dedicated all copyright *
@@ -21,14 +21,20 @@
  */
 #include "module.h"
 
+/* memcpy() and memset() in SP DMA */
+#include <string.h>
+
 u32 inst_word;
 
-u32 SR[32];
+u32 SR[NUMBER_OF_SCALAR_REGISTERS];
 typedef VECTOR_OPERATION(*p_vector_func)(v16, v16);
 
 pu8 DRAM;
 pu8 DMEM;
 pu8 IMEM;
+unsigned long su_max_address = 0x007FFFFFul;
+
+static int temp_PC;
 
 NOINLINE void res_S(void)
 {
@@ -56,8 +62,6 @@ void SP_CP0_MF(unsigned int rt, unsigned int rd)
     SR[zero] = 0x00000000;
     if (rd == 0x7) {
         if (CFG_MEND_SEMAPHORE_LOCK == 0)
-            return;
-        if (CFG_HLE_GFX | CFG_HLE_AUD)
             return;
         GET_RCP_REG(SP_SEMAPHORE_REG) = 0x00000001;
         GET_RCP_REG(SP_STATUS_REG) |= SP_STATUS_HALT; /* temporary hack */
@@ -100,36 +104,41 @@ static void MT_SP_STATUS(unsigned int rt)
     pu32 SP_STATUS_REG;
 
     if (SR[rt] & 0xFE000040)
-        message("MTC0\nSP_STATUS");
-    MI_INTR_REG = GET_RSP_INFO(MI_INTR_REG);
+        message("MTC0\nSP_STATUS"); /* bits we don't know what to do with */
     SP_STATUS_REG = GET_RSP_INFO(SP_STATUS_REG);
 
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00000001) <<  0);
-    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00000002) <<  0);
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00000004) <<  1);
-    *MI_INTR_REG &= ~((SR[rt] & 0x00000008) >> 3); /* SP_CLR_INTR */
-    *MI_INTR_REG |=  ((SR[rt] & 0x00000010) >> 4); /* SP_SET_INTR */
-    *SP_STATUS_REG |= (SR[rt] & 0x00000010) >> 4; /* int set halt */
+ /* DMA_BUSY, DMA_FULL, IO_FULL:  No feature exists to clear these. */
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00000020) <<  5);
- /* *SP_STATUS_REG |=  (!!(SR[rt] & 0x00000040) <<  5); */
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00000080) <<  6);
-    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00000100) <<  6);
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00000200) <<  7);
-    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00000400) <<  7); /* yield request? */
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00000800) <<  8);
-    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00001000) <<  8); /* yielded? */
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00002000) <<  9);
-    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00004000) <<  9); /* task done? */
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00008000) << 10);
-    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00010000) << 10);
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00020000) << 11);
-    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00040000) << 11);
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00080000) << 12);
-    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00100000) << 12);
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00200000) << 13);
-    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00400000) << 13);
     *SP_STATUS_REG &= ~(!!(SR[rt] & 0x00800000) << 14);
+
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00000002) <<  0);
+ /* No feature exists to set BROKE:  (!!1 << 1) */
+ /* DMA_BUSY, DMA_FULL, IO_FULL:  No feature exists to set these. */
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00000040) <<  5);
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00000100) <<  6);
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00000400) <<  7); /* yield request? */
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00001000) <<  8); /* yielded? */
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00004000) <<  9); /* task done? */
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00010000) << 10);
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00040000) << 11);
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00100000) << 12);
+    *SP_STATUS_REG |=  (!!(SR[rt] & 0x00400000) << 13);
     *SP_STATUS_REG |=  (!!(SR[rt] & 0x01000000) << 14);
+
+    MI_INTR_REG = GET_RSP_INFO(MI_INTR_REG);
+    *MI_INTR_REG   &= ~((SR[rt] & 0x00000008) >> 3); /* SP_CLR_INTR */
+    *MI_INTR_REG   |=  ((SR[rt] & 0x00000010) >> 4); /* SP_SET_INTR */
+    *SP_STATUS_REG |=   (SR[rt] & 0x00000010) >> 4; /* int set halt */
     return;
 }
 static void MT_SP_RESERVED(unsigned int rt)
@@ -156,9 +165,7 @@ static void MT_CMD_END(unsigned int rt)
     if (GET_RCP_REG(DPC_BUFBUSY_REG))
         message("MTC0\nCMD_END"); /* This is just CA-related. */
     GET_RCP_REG(DPC_END_REG) = SR[rt] & 0xFFFFFFF8ul;
-    if (GET_RSP_INFO(ProcessRdpList) == NULL) /* zilmar GFX #1.2 */
-        return;
-    GET_RSP_INFO(ProcessRdpList)();
+    GBI_phase();
     return;
 }
 static void MT_CMD_STATUS(unsigned int rt)
@@ -229,15 +236,16 @@ void SP_DMA_READ(void)
         do {
             offC = (count*length + *CR[0x0] + i) & 0x00001FF8ul;
             offD = (count*skip + *CR[0x1] + i) & 0x00FFFFF8ul;
-            *(pi64)(DMEM + offC) =
-                *(pi64)(DRAM + offD)
-              & (offD & ~MAX_DRAM_DMA_ADDR ? 0 : ~0) /* 0 if (addr > limit) */
-            ;
             i += 0x008;
+            if (offD > su_max_address) {
+                memset(DMEM + offC, 0x00, 8);
+                continue;
+            }
+            memcpy(DMEM + offC, DRAM + offD, 8);
         } while (i < length);
     } while (count);
 
-    if ((*CR[0x0] & 0x1000) ^ (offC & 0x1000))
+    if ((*CR[0x0] ^ offC) & 0x1000)
         message("DMA over the DMEM-to-IMEM gap.");
     GET_RCP_REG(SP_DMA_BUSY_REG)  =  0x00000000;
     GET_RCP_REG(SP_STATUS_REG)   &= ~SP_STATUS_DMA_BUSY;
@@ -268,12 +276,14 @@ void SP_DMA_WRITE(void)
         do {
             offC = (count*length + *CR[0x0] + i) & 0x00001FF8ul;
             offD = (count*skip + *CR[0x1] + i) & 0x00FFFFF8ul;
-            *(pi64)(DRAM + offD) = *(pi64)(DMEM + offC);
             i += 0x000008;
+            if (offD > su_max_address)
+                continue;
+            memcpy(DRAM + offD, DMEM + offC, 8);
         } while (i < length);
     } while (count);
 
-    if ((*CR[0x0] & 0x1000) ^ (offC & 0x1000))
+    if ((*CR[0x0] ^ offC) & 0x1000)
         message("DMA over the DMEM-to-IMEM gap.");
     GET_RCP_REG(SP_DMA_BUSY_REG)  =  0x00000000;
     GET_RCP_REG(SP_STATUS_REG)   &= ~SP_STATUS_DMA_BUSY;
@@ -386,7 +396,7 @@ PROFILE_MODE void SLTI(u32 inst)
     const unsigned int rs = (inst >> 21) % (1 << 5);
     const unsigned int rt = (inst >> 16) % (1 << 5);
 
-    SR[rt] = ((s32)(SR[rs]) < (s16)(immediate)) ? 1 : 0;
+    SR[rt] = ((s32)(SR[rs]) < (s32)SIGNED_IMM16(immediate)) ? 1 : 0;
     SR[zero] = 0x00000000;
 }
 PROFILE_MODE void SLTIU(u32 inst)
@@ -395,7 +405,7 @@ PROFILE_MODE void SLTIU(u32 inst)
     const unsigned int rs = (inst >> 21) % (1 << 5);
     const unsigned int rt = (inst >> 16) % (1 << 5);
 
-    SR[rt] = ((u32)(SR[rs]) < (u16)(immediate)) ? 1 : 0;
+    SR[rt] = ((u32)(SR[rs]) < (u32)SIGNED_IMM16(immediate)) ? 1 : 0;
     SR[zero] = 0x00000000;
 }
 
@@ -829,30 +839,12 @@ void SDV(unsigned vt, unsigned element, signed offset, unsigned base)
     return;
 }
 
-static char transfer_debug[32] = "?WC2    $v00[0x0], 0x000($00)";
-static const char digits[16] = {
-    '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'
-};
-
-NOINLINE void res_lsw(
-    unsigned vt,
-    unsigned element,
-    signed offset,
-    unsigned base)
+NOINLINE void
+res_lsw(unsigned vt, unsigned element, signed offset, unsigned base)
 {
-    transfer_debug[10] = '0' + (unsigned char)vt/10;
-    transfer_debug[11] = '0' + (unsigned char)vt%10;
-
-    transfer_debug[15] = digits[element & 0xF];
-
-    transfer_debug[21] = digits[(offset & 0xFFF) >>  8];
-    transfer_debug[22] = digits[(offset & 0x0FF) >>  4];
-    transfer_debug[23] = digits[(offset & 0x00F) >>  0];
-
-    transfer_debug[26] = '0' + (unsigned char)base/10;
-    transfer_debug[27] = '0' + (unsigned char)base%10;
-
-    message(transfer_debug);
+    message("Reserved vector unit transfer operation.");
+    if (vt != element + base || offset != 0) /* unused parameters */
+        return;
     return;
 }
 
@@ -1654,9 +1646,8 @@ void STV(unsigned vt, unsigned element, signed offset, unsigned base)
     return;
 }
 
-int temp_PC;
 #ifdef WAIT_FOR_CPU_HOST
-short MFC0_count[32];
+short MFC0_count[NUMBER_OF_SCALAR_REGISTERS];
 #endif
 
 mwc2_func LWC2[2 * 8*2] = {
@@ -1672,27 +1663,6 @@ mwc2_func SWC2[2 * 8*2] = {
     res_lsw,res_lsw,res_lsw,res_lsw,res_lsw,res_lsw,res_lsw,res_lsw,
 };
 
-static ALIGNED i16 shuffle_temporary[N];
-#ifndef ARCH_MIN_SSE2
-static const unsigned char ei[1 << 4][N] = {
-    { 00, 01, 02, 03, 04, 05, 06, 07 }, /* none (vector-only operand) */
-    { 00, 01, 02, 03, 04, 05, 06, 07 },
-    { 00, 00, 02, 02, 04, 04, 06, 06 }, /* 0Q */
-    { 01, 01, 03, 03, 05, 05, 07, 07 }, /* 1Q */
-    { 00, 00, 00, 00, 04, 04, 04, 04 }, /* 0H */
-    { 01, 01, 01, 01, 05, 05, 05, 05 }, /* 1H */
-    { 02, 02, 02, 02, 06, 06, 06, 06 }, /* 2H */
-    { 03, 03, 03, 03, 07, 07, 07, 07 }, /* 3H */
-    { 00, 00, 00, 00, 00, 00, 00, 00 }, /* 0W */
-    { 01, 01, 01, 01, 01, 01, 01, 01 }, /* 1W */
-    { 02, 02, 02, 02, 02, 02, 02, 02 }, /* 2W */
-    { 03, 03, 03, 03, 03, 03, 03, 03 }, /* 3W */
-    { 04, 04, 04, 04, 04, 04, 04, 04 }, /* 4W */
-    { 05, 05, 05, 05, 05, 05, 05, 05 }, /* 5W */
-    { 06, 06, 06, 06, 06, 06, 06, 06 }, /* 6W */
-    { 07, 07, 07, 07, 07, 07, 07, 07 }, /* 7W */
-};
-#endif
 
 PROFILE_MODE int SPECIAL(u32 inst, u32 PC)
 {
@@ -1827,12 +1797,12 @@ PROFILE_MODE void MWC2_load(u32 inst)
     const unsigned int vt      = (inst >> 16) % (1 << 5);
     const unsigned int element = (inst >>  7) % (1 << 4);
 
-#ifdef ARCH_MIN_SSE2
+#if defined(ARCH_MIN_SSE2) && !defined(SSE2NEON)
     offset   = (s16)inst;
     offset <<= 5 + 4; /* safe on x86, skips 5-bit rd, 4-bit element */
     offset >>= 5 + 4;
 #else
-    offset = (inst & 64) ? -(s16)(~inst%64 + 1) : inst % 64;
+    offset = (inst & 64) ? -(s16)(~inst%64 + 1) : (s16)(inst % 64);
 #endif
     LWC2[IW_RD(inst)](vt, element, offset, base);
 }
@@ -1843,12 +1813,12 @@ PROFILE_MODE void MWC2_store(u32 inst)
     const unsigned int vt      = (inst >> 16) % (1 << 5);
     const unsigned int element = (inst >>  7) % (1 << 4);
 
-#ifdef ARCH_MIN_SSE2
+#if defined(ARCH_MIN_SSE2) && !defined(SSE2NEON)
     offset = (s16)inst;
     offset <<= 5 + 4; /* safe on x86, skips 5-bit rd, 4-bit element */
     offset >>= 5 + 4;
 #else
-    offset = (inst & 64) ? -(s16)(~inst%64 + 1) : inst % 64;
+    offset = (inst & 64) ? -(s16)(~inst%64 + 1) : (s16)(inst % 64);
 #endif
     SWC2[IW_RD(inst)](vt, element, offset, base);
 }
@@ -1883,6 +1853,7 @@ PROFILE_MODE void COP2(u32 inst)
 #endif
 
     switch (op) {
+        static ALIGNED i16 shuffle_temporary[N];
 #ifdef ARCH_MIN_SSE2
         v16 target;
 #else
@@ -1913,6 +1884,12 @@ PROFILE_MODE void COP2(u32 inst)
     case 022:
     case 023:
 #ifdef ARCH_MIN_SSE2
+#ifdef __ARM_NEON__
+        target = (v16)vld1q_u16(&VR[vt][0 + op - 0x12]);
+        target = (v16)vshlq_n_u32((uint32x4_t)target, 16);
+        target = (v16)vorrq_u16((uint16x8_t)target,
+                                (uint16x8_t)vshrq_n_u32((uint32x4_t)target, 16));
+#else
         shuffle_temporary[0] = VR[vt][0 + op - 0x12];
         shuffle_temporary[2] = VR[vt][2 + op - 0x12];
         shuffle_temporary[4] = VR[vt][4 + op - 0x12];
@@ -1920,6 +1897,7 @@ PROFILE_MODE void COP2(u32 inst)
         target = *(v16 *)(&shuffle_temporary[0]);
         target = _mm_shufflehi_epi16(target, _MM_SHUFFLE(2, 2, 0, 0));
         target = _mm_shufflelo_epi16(target, _MM_SHUFFLE(2, 2, 0, 0));
+#endif
         *(v16 *)(VR[vd]) = COP2_C2[func](*(v16 *)VR[vs], target);
 #else
         for (i = 0; i < N; i++)
@@ -1933,11 +1911,16 @@ PROFILE_MODE void COP2(u32 inst)
     case 026:
     case 027:
 #ifdef ARCH_MIN_SSE2
+#ifdef __ARM_NEON__
+        target = (v16)vcombine_s16(vdup_n_s16(VR[vt][0 + op - 0x14]),
+                                   vdup_n_s16(VR[vt][4 + op - 0x14]));
+#else
         target = _mm_setzero_si128();
         target = _mm_insert_epi16(target, VR[vt][0 + op - 0x14], 0);
         target = _mm_insert_epi16(target, VR[vt][4 + op - 0x14], 4);
         target = _mm_shufflehi_epi16(target, _MM_SHUFFLE(0, 0, 0, 0));
         target = _mm_shufflelo_epi16(target, _MM_SHUFFLE(0, 0, 0, 0));
+#endif
         *(v16 *)(VR[vd]) = COP2_C2[func](*(v16 *)VR[vs], target);
 #else
         for (i = 0; i < N; i++)
@@ -2110,5 +2093,6 @@ set_branch_delay:
     }
 RSP_halted_CPU_exit_point:
     GET_RCP_REG(SP_PC_REG) = 0x04001000 | FIT_IMEM(PC);
+
     return;
 }

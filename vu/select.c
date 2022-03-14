@@ -1,7 +1,7 @@
 /******************************************************************************\
 * Project:  MSP Simulation Layer for Vector Unit Computational Test Selects    *
 * Authors:  Iconoclast                                                         *
-* Release:  2015.01.30                                                         *
+* Release:  2018.11.26                                                         *
 * License:  CC0 Public Domain Dedication                                       *
 *                                                                              *
 * To the extent possible under law, the author(s) have dedicated all copyright *
@@ -29,7 +29,7 @@
  */
 static void merge(pi16 VD, pi16 cmp, pi16 pass, pi16 fail)
 {
-    register int i;
+    register unsigned int i;
 #if (0 != 0)
 /* Do not use this version yet, as it still does not vectorize to SSE2. */
     for (i = 0; i < N; i++)
@@ -49,7 +49,7 @@ INLINE static void do_lt(pi16 VD, pi16 VS, pi16 VT)
 {
     i16 cn[N];
     i16 eq[N];
-    register int i;
+    register unsigned int i;
 
     for (i = 0; i < N; i++)
         eq[i] = (VS[i] == VT[i]);
@@ -75,7 +75,7 @@ INLINE static void do_lt(pi16 VD, pi16 VS, pi16 VT)
 
 INLINE static void do_eq(pi16 VD, pi16 VS, pi16 VT)
 {
-    register int i;
+    register unsigned int i;
 
     for (i = 0; i < N; i++)
         cf_comp[i] = (VS[i] == VT[i]);
@@ -98,7 +98,7 @@ INLINE static void do_eq(pi16 VD, pi16 VS, pi16 VT)
 
 INLINE static void do_ne(pi16 VD, pi16 VS, pi16 VT)
 {
-    register int i;
+    register unsigned int i;
 
     for (i = 0; i < N; i++)
         cf_comp[i] = (VS[i] != VT[i]);
@@ -123,7 +123,7 @@ INLINE static void do_ge(pi16 VD, pi16 VS, pi16 VT)
 {
     i16 ce[N];
     i16 eq[N];
-    register int i;
+    register unsigned int i;
 
     for (i = 0; i < N; i++)
         eq[i] = (VS[i] == VT[i]);
@@ -154,7 +154,7 @@ INLINE static void do_cl(pi16 VD, pi16 VS, pi16 VT)
     ALIGNED i16 gen[N], len[N], lz[N], uz[N], sn[N];
     i16 diff[N];
     i16 cmp[N];
-    register int i;
+    register unsigned int i;
 
     vector_copy((pi16)VB, VS);
     vector_copy((pi16)VC, VT);
@@ -230,7 +230,7 @@ INLINE static void do_ch(pi16 VD, pi16 VS, pi16 VT)
     i16 diff[N];
 #endif
     i16 cch[N]; /* corner case hack:  -(-32768) with undefined sign */
-    register int i;
+    register unsigned int i;
 
     for (i = 0; i < N; i++)
         cch[i] = (VT[i] == -32768) ? ~0 : 0; /* -(-32768) might not be >= 0. */
@@ -245,10 +245,16 @@ INLINE static void do_ch(pi16 VD, pi16 VS, pi16 VT)
         cf_vce[i]  = (VS[i] == VC[i]); /* 2's complement:  VC = -VT - 1 = ~VT */
     for (i = 0; i < N; i++)
         cf_vce[i] &= sn[i];
+
+/*
+ * if (sign flag), then converts ~(VT) into -(VT) a.k.a. ~(VT) - (-1)
+ * Note that if (VT == INT16_MIN) a.k.a. cch[i], -(-32768) is undefined.
+ */
     for (i = 0; i < N; i++)
-        VC[i] -= sn[i] & cch[i]; /* converts ~(VT) into -(VT) if (sign) */
+        VC[i] -= sn[i] & ~cch[i]; /* cch[i] causes -(-32768) to stay ~-32768. */
+
     for (i = 0; i < N; i++)
-        eq[i]  = (VS[i] == VC[i]) & ~cch[i]; /* (VS == +32768) is never true. */
+        eq[i]  = (VS[i] == VC[i]) & ~cch[i]; /* VS = -(-32768) never happens. */
     for (i = 0; i < N; i++)
         eq[i] |= cf_vce[i];
 
@@ -297,7 +303,7 @@ INLINE static void do_cr(pi16 VD, pi16 VS, pi16 VT)
     ALIGNED i16 ge[N], le[N], sn[N];
     ALIGNED i16 VC[N];
     i16 cmp[N];
-    register int i;
+    register unsigned int i;
 
     vector_copy(VC, VT);
     for (i = 0; i < N; i++)
@@ -360,6 +366,7 @@ VECTOR_OPERATION VLT(v16 vs, v16 vt)
 #endif
     do_lt(VD, VS, VT);
 #ifdef ARCH_MIN_SSE2
+    COMPILER_FENCE();
     vs = *(v16 *)VD;
     return (vs);
 #else
@@ -384,6 +391,7 @@ VECTOR_OPERATION VEQ(v16 vs, v16 vt)
 #endif
     do_eq(VD, VS, VT);
 #ifdef ARCH_MIN_SSE2
+    COMPILER_FENCE();
     vs = *(v16 *)VD;
     return (vs);
 #else
@@ -408,6 +416,7 @@ VECTOR_OPERATION VNE(v16 vs, v16 vt)
 #endif
     do_ne(VD, VS, VT);
 #ifdef ARCH_MIN_SSE2
+    COMPILER_FENCE();
     vs = *(v16 *)VD;
     return (vs);
 #else
@@ -432,6 +441,7 @@ VECTOR_OPERATION VGE(v16 vs, v16 vt)
 #endif
     do_ge(VD, VS, VT);
 #ifdef ARCH_MIN_SSE2
+    COMPILER_FENCE();
     vs = *(v16 *)VD;
     return (vs);
 #else
@@ -456,6 +466,7 @@ VECTOR_OPERATION VCL(v16 vs, v16 vt)
 #endif
     do_cl(VD, VS, VT);
 #ifdef ARCH_MIN_SSE2
+    COMPILER_FENCE();
     vs = *(v16 *)VD;
     return (vs);
 #else
@@ -480,6 +491,7 @@ VECTOR_OPERATION VCH(v16 vs, v16 vt)
 #endif
     do_ch(VD, VS, VT);
 #ifdef ARCH_MIN_SSE2
+    COMPILER_FENCE();
     vs = *(v16 *)VD;
     return (vs);
 #else
@@ -504,6 +516,7 @@ VECTOR_OPERATION VCR(v16 vs, v16 vt)
 #endif
     do_cr(VD, VS, VT);
 #ifdef ARCH_MIN_SSE2
+    COMPILER_FENCE();
     vs = *(v16 *)VD;
     return (vs);
 #else
@@ -528,6 +541,7 @@ VECTOR_OPERATION VMRG(v16 vs, v16 vt)
 #endif
     do_mrg(VD, VS, VT);
 #ifdef ARCH_MIN_SSE2
+    COMPILER_FENCE();
     vs = *(v16 *)VD;
     return (vs);
 #else

@@ -32,6 +32,11 @@
 #ifndef _MY_TYPES_H_
 #define _MY_TYPES_H_
 
+#if defined(USE_SSE2NEON) && defined(__ARM_NEON__)
+#include "sse2neon/SSE2NEON.h"
+#define ARCH_MIN_SSE2
+#endif
+
 /*
  * This is the only method we really need to care about for defining types.
  *
@@ -372,7 +377,6 @@ typedef void(*p_func)(void);
 #endif
 #endif
 
-
 /*
  * Commonly, Ultra64 will refer to these common symbols.
  * They seem to be fairly widely used outside of just <windows.h>.
@@ -492,6 +496,12 @@ typedef struct {
     unsigned opcode   :   6;
     unsigned long target; /* If `int' can't store 26 bits, `long' can. */
 } MIPS_type_J;
+#endif
+
+#if defined(__arm__) && (defined(__GNUC__) || defined(__clang__))
+#define COMPILER_FENCE()     __asm__ __volatile__("":::"memory")
+#else
+#define COMPILER_FENCE()
 #endif
 
 #endif
